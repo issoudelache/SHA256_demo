@@ -31,13 +31,13 @@ class RoundState:
     i: int
     a: int; b: int; c: int; d: int; e: int; f: int; g: int; h: int
     T1: int; T2: int; K: int; W: int
+    Ch: int; Maj: int; Sigma0: int; Sigma1: int
 
 @dataclass
 class Trace:
     padding: Dict[str, int]
-    blocks: List[List[int]]          # per block: 16 initial 32-bit words
-    schedules: List[List[int]]       # per block: W[0..63]
-    rounds: List[List[RoundState]]   # per block: 64 round states
+    blocks: List[Dict[str, any]]
+    digest: str
 
 # Padding
 def _pad(message: bytes) -> bytes:
@@ -62,14 +62,18 @@ def _schedule(block: bytes) -> List[int]:
 def _compress(H: List[int], W: List[int], trace_rounds: List[RoundState] | None = None) -> List[int]:
     a, b, c, d, e, f, g, h = H
     for i in range(64):
-        T1 = to_uint32(h + Sigma1(e) + Ch(e, f, g) + K[i] + W[i])
-        T2 = to_uint32(Sigma0(a) + Maj(a, b, c))
+        s1 = Sigma1(e)
+        ch = Ch(e, f, g)
+        T1 = to_uint32(h + s1 + ch + K[i] + W[i])
+        s0 = Sigma0(a)
+        maj = Maj(a, b, c)
+        T2 = to_uint32(s0 + maj)
         h = g; g = f; f = e
         e = to_uint32(d + T1)
         d = c; c = b; b = a
         a = to_uint32(T1 + T2)
         if trace_rounds is not None:
-            trace_rounds.append(RoundState(i, a, b, c, d, e, f, g, h, T1, T2, K[i], W[i]))
+            trace_rounds.append(RoundState(i, a, b, c, d, e, f, g, h, T1, T2, K[i], W[i], ch, maj, s0, s1))
     return [
         to_uint32(H[0] + a), to_uint32(H[1] + b), to_uint32(H[2] + c), to_uint32(H[3] + d),
         to_uint32(H[4] + e), to_uint32(H[5] + f), to_uint32(H[6] + g), to_uint32(H[7] + h),
@@ -88,34 +92,37 @@ def sha256(data: bytes) -> bytes:
 def sha256_hex(text: str) -> str:
     return sha256(text.encode("utf-8")).hex()
 
-def sha256_trace(data: bytes) -> Tuple[bytes, Trace]:
+def sha256_trace(data: bytes) -> Dict:
     H = H0.copy()
     padded = _pad(data)
-    total_pad_bits = (len(padded) - len(data)) * 8
-    zero_bits = total_pad_bits - 1 - 64
 
     pad_info = {
         "data_bits": len(data) * 8,
         "one_bit": 1,
-        "zero_pad_bits": zero_bits,
-        "len_field_bits": 64,
+        "zero_bits": (len(padded) - len(data)) * 8 - 1 - 64,
+        "len_bits": 64,
         "total_bits": len(padded) * 8,
-        "blocks": len(padded) // 64,
     }
 
-    blocks_words: List[List[int]] = []
-    schedules: List[List[int]] = []
-    rounds: List[List[RoundState]] = []
+    trace_blocks = []
 
     for i in range(0, len(padded), 64):
-        block = padded[i:i+64]
-        words16 = [int.from_bytes(block[4*t:4*(t+1)], "big") for t in range(16)]
-        blocks_words.append(words16)
-        W = _schedule(block)
-        schedules.append(W)
-        rlist: List[RoundState] = []
-        H = _compress(H, W, rlist)
-        rounds.append(rlist)
+        block_bytes = padded[i:i+64]
+        W = _schedule(block_bytes)
 
-    digest = b"".join(x.to_bytes(4, "big") for x in H)
-    return digest, Trace(pad_info, blocks_words, schedules, rounds)
+        block_rounds = []
+        H = _compress(H, W, block_rounds)
+
+        trace_blocks.append({
+            "words": [f"0x{int.from_bytes(block_bytes[j:j+4], 'big'):08x}" for j in range(0, 64, 4)],
+            "schedule": W,
+            "rounds": [r.__dict__ for r in block_rounds]
+        })
+
+    digest = "".join(f"{x:08x}" for x in H)
+
+    return {
+        "padding": pad_info,
+        "blocks": trace_blocks,
+        "digest": digest
+    }
