@@ -1,6 +1,6 @@
 # UI moderne (ttkbootstrap si disponible, sinon ttk standard)
 import tkinter as tk
-from tkinter import messagebox, filedialog
+from tkinter import messagebox, filedialog, ttk
 from tkinter.scrolledtext import ScrolledText
 
 # try ttkbootstrap, fallback to ttk
@@ -56,12 +56,12 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
             super().__init__()
         # Couleur de texte pour les zones explicatives et les canvases (adaptée au thème)
         if UsingBootstrap:
-            self._text_color = "#ffffff"  # thème sombre → texte clair
+            self._text_color = "#334"  # thème sombre → texte clair
         else:
             self._text_color = "#334"     # thème clair → texte sombre
 
         self.title("SHA-256 — Démo pas-à-pas (UI moderne)")
-        self.geometry("1200x820")
+        self.geometry("1200x920")
         self.minsize(1024, 700)
 
         # Menu
@@ -667,6 +667,13 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
             self.status.set("Erreur d'affichage schedule")
             raise
 
+    def _concat_registers_digest(self, round_info) -> str:
+        """Concatène les registres a..h (32 bits chacun) en une chaîne hex de 64 caractères."""
+        try:
+            return ''.join(f"{round_info[reg]:08x}" for reg in "abcdefgh")
+        except Exception:
+            return "—"
+
     def _update_rounds_view(self):
         """Met à jour la vue des rounds"""
         try:
@@ -684,6 +691,10 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
             self.round_vars["T2"].set(f"0x{round_info['T2']:08x}")
             self.round_vars["K"].set(f"0x{round_info['K']:08x}")
             self.round_vars["W"].set(f"0x{round_info['W']:08x}")
+
+            # Mettre à jour l'affichage du digest en concaténant a..h
+            digest_from_regs = self._concat_registers_digest(round_info)
+            self.var_hex.set(digest_from_regs)
 
             # Mise à jour du canvas d'opérations
             self._draw_round_operations(round_info)
@@ -900,6 +911,42 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
         except (ValueError, tk.TclError):
             pass
 
+    # Dans la méthode _build_vis_registers
+    def _build_vis_registers(self, parent):
+        frame = ttk.Frame(parent)
+
+        # Création d'un style personnalisé pour les registres
+        style = ttk.Style()
+        style.configure('Register.TLabel',
+                       background='white',
+                       foreground='black',
+                       font=('Courier', 14),
+                       relief='solid',
+                       padding=5)
+
+        for i, reg in enumerate(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']):
+            header = ttk.Label(frame, text=reg.upper(), font=('Courier', 12))
+            header.grid(row=0, column=i)
+
+            # Utilisation d'un Label ttk avec notre style personnalisé
+            value = ttk.Label(frame,
+                             text='00000000',
+                             style='Register.TLabel',
+                             width=10)
+            value.grid(row=1, column=i, padx=2, pady=2)
+            self.vis_regs[reg] = value
+
+        return frame
+
+    def update_registers(self, state=None):
+        if not state:
+            return
+        values = {
+            'a': state.a, 'b': state.b, 'c': state.c, 'd': state.d,
+            'e': state.e, 'f': state.f, 'g': state.g, 'h': state.h
+        }
+        for reg, value in values.items():
+            self.vis_regs[reg].configure(text=f"{value:08x}")
 
 
 if __name__ == "__main__":
