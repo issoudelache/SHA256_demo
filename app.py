@@ -96,9 +96,10 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
 
         # Message input + digest
         top_frame = tb.Labelframe(self, text="Message")
-        top_frame.pack(side=TOP, fill=BOTH, expand=True, padx=12, pady=(0, 10))  # Corrected types
+        top_frame.pack(side=TOP, fill=BOTH, expand=True, padx=12, pady=(0, 10))
         self.txt = ScrolledText(top_frame, height=6, wrap=tk.WORD)
-        self.txt.pack(side=TOP, fill=BOTH, expand=True, padx=10, pady=10)  # Corrected types
+        self.txt.pack(side=TOP, fill=BOTH, expand=True, padx=10, pady=10)
+        # Suppression du binding pour le padding
         digest_row = tb.Frame(top_frame)
         digest_row.pack(side=TOP, fill=X, padx=10, pady=(0, 10))  # Corrected types
         tb.Label(digest_row, text="Digest (hex)").pack(side=LEFT)  # Corrected types
@@ -111,7 +112,6 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
         nb.pack(side=TOP, fill=BOTH, expand=True, padx=12, pady=0)  # Corrected types
         self.nb = nb
         self.tab_padding = self._build_tab_padding()
-        self.tab_blocks = self._build_tab_blocks()
         self.tab_schedule = self._build_tab_schedule()
         self.tab_rounds = self._build_tab_rounds()
         self.tab_visual = self._build_tab_visual()
@@ -180,21 +180,6 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
         for i, (lab, key) in enumerate(labels):
             tb.Label(grid, text=lab).grid(row=i, column=0, sticky="w", pady=4, padx=(0, 12))
             tb.Label(grid, textvariable=self.pad_vars[key]).grid(row=i, column=1, sticky="w")
-        return f
-
-    def _build_tab_blocks(self):
-        f = tb.Frame(self.nb); self.nb.add(f, text="Blocs & mots")
-        ctrl = tb.Frame(f); ctrl.pack(side=TOP, fill=X, padx=12, pady=(12, 6))
-        tb.Label(ctrl, text="Bloc #").pack(side=LEFT)
-        self.spin_block = tk.Spinbox(ctrl, from_=0, to=0, width=6, command=self.on_block_changed)
-        self.spin_block.pack(side=LEFT, padx=8)
-        tb.Button(ctrl, text="◀", width=3, command=lambda: self._jump_block(-1)).pack(side=LEFT)
-        tb.Button(ctrl, text="▶", width=3, command=lambda: self._jump_block(+1)).pack(side=LEFT, padx=(4, 0))
-        cols = [f"W{i}" for i in range(16)]
-        self.tbl_words = tb.Treeview(f, columns=cols, show="headings", height=6)
-        for c in cols:
-            self.tbl_words.heading(c, text=c); self.tbl_words.column(c, width=90, anchor="center")
-        self.tbl_words.pack(side=TOP, fill=BOTH, expand=True, padx=12, pady=(0, 12))
         return f
 
     def _build_tab_schedule(self):
@@ -334,31 +319,31 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
         f = tb.Frame(self.nb)
         self.nb.add(f, text="Comparaison")
 
-        # Panneau de contrôle
-        ctrl = tb.Frame(f)
-        ctrl.pack(side=TOP, fill=X, padx=12, pady=12)
-
         # Entrées pour les deux hash
         input_frame = tb.Labelframe(f, text="Entrées à comparer")
-        input_frame.pack(side=TOP, fill=X, padx=12, pady=(0, 12))
+        input_frame.pack(side=TOP, fill=X, padx=12, pady=(12, 6))
 
-        # Premier message
-        msg1_frame = tb.Frame(input_frame)
-        msg1_frame.pack(side=TOP, fill=X, padx=8, pady=8)
-        tb.Label(msg1_frame, text="Message 1:").pack(side=LEFT)
-        self.txt_msg1 = ScrolledText(msg1_frame, height=3, width=50)
-        self.txt_msg1.pack(side=LEFT, fill=X, expand=True, padx=(8, 0))
+        # Messages côte à côte pour gagner de l'espace vertical
+        msg_frame = tb.Frame(input_frame)
+        msg_frame.pack(side=TOP, fill=X, padx=8, pady=4)
 
-        # Deuxième message
-        msg2_frame = tb.Frame(input_frame)
-        msg2_frame.pack(side=TOP, fill=X, padx=8, pady=8)
-        tb.Label(msg2_frame, text="Message 2:").pack(side=LEFT)
-        self.txt_msg2 = ScrolledText(msg2_frame, height=3, width=50)
-        self.txt_msg2.pack(side=LEFT, fill=X, expand=True, padx=(8, 0))
+        # Premier message (à gauche)
+        msg1_frame = tb.Frame(msg_frame)
+        msg1_frame.pack(side=LEFT, fill=X, expand=True, padx=(0, 4))
+        tb.Label(msg1_frame, text="Message 1:").pack(side=TOP, anchor="w")
+        self.txt_msg1 = ScrolledText(msg1_frame, height=2, width=40)
+        self.txt_msg1.pack(side=TOP, fill=X, expand=True)
+
+        # Deuxième message (à droite)
+        msg2_frame = tb.Frame(msg_frame)
+        msg2_frame.pack(side=LEFT, fill=X, expand=True, padx=(4, 0))
+        tb.Label(msg2_frame, text="Message 2:").pack(side=TOP, anchor="w")
+        self.txt_msg2 = ScrolledText(msg2_frame, height=2, width=40)
+        self.txt_msg2.pack(side=TOP, fill=X, expand=True)
 
         # Bouton de comparaison
         btn_frame = tb.Frame(input_frame)
-        btn_frame.pack(side=TOP, fill=X, padx=8, pady=(0, 8))
+        btn_frame.pack(side=TOP, fill=X, padx=8, pady=(0, 4))
         tb.Button(btn_frame, text="Comparer", command=self.compare_hashes).pack(side=RIGHT)
 
         # Zone de résultats
@@ -369,15 +354,8 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
         self.diff_canvas = tk.Canvas(results_frame, background='white')
         self.diff_canvas.pack(side=TOP, fill=BOTH, expand=True, padx=8, pady=8)
 
-        # Statistiques
-        stats_frame = tb.Frame(results_frame)
-        stats_frame.pack(side=BOTTOM, fill=X, padx=8, pady=8)
-        self.var_diff_percent = tk.StringVar(value="Différence: ---%")
-        tb.Label(stats_frame, textvariable=self.var_diff_percent).pack(side=LEFT)
-
         return f
 
-    # --- Action methods ---
     def compare_hashes(self):
         """Compare deux messages et affiche leurs différences"""
         try:
@@ -387,15 +365,6 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
             self._hash1 = sha256_trace(msg1)
             self._hash2 = sha256_trace(msg2)
 
-            # Calcul des différences
-            h1 = int(self._hash1['digest'], 16)
-            h2 = int(self._hash2['digest'], 16)
-            diff = h1 ^ h2
-            diff_bits = bin(diff)[2:].zfill(256)
-            diff_count = diff_bits.count('1')
-            diff_percent = (diff_count / 256) * 100
-
-            self.var_diff_percent.set(f"Différence: {diff_percent:.2f}%")
 
             # Mise à jour du canvas
             self.draw_hash_comparison(self._hash1['digest'], self._hash2['digest'])
@@ -409,21 +378,40 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
         width = self.diff_canvas.winfo_width()
         height = self.diff_canvas.winfo_height()
 
+        # Calcul des dimensions et positions
+        margin_top = 50  # Espace pour le texte en haut
+        margin_bottom = 30  # Espace minimal en bas
+        matrix_height = height - margin_top - margin_bottom
+
         # Conversion en binaire
         bin1 = bin(int(hash1, 16))[2:].zfill(256)
         bin2 = bin(int(hash2, 16))[2:].zfill(256)
+
+        # Calcul du pourcentage de différence
+        diff_bits = sum(1 for a, b in zip(bin1, bin2) if a != b)
+        diff_percent = (diff_bits / 256) * 100
+
+        # Afficher les statistiques en haut
+        stats_text = f"Différences : {diff_bits} bits sur 256 ({diff_percent:.2f}%)"
+        self.diff_canvas.create_text(
+            width / 2, 20,
+            text=stats_text,
+            font=("Segoe UI", 12, "bold"),
+            fill=self._text_color
+        )
 
         # Dimensions de la matrice
         cols = 32
         rows = 8
         cell_w = width / cols
-        cell_h = height / rows
+        cell_h = matrix_height / rows
 
+        # Dessiner les cellules de la matrice
         for i in range(256):
             row = i // cols
             col = i % cols
             x = col * cell_w
-            y = row * cell_h
+            y = row * cell_h + margin_top
 
             # Couleurs basées sur les différences
             if bin1[i] != bin2[i]:
@@ -435,6 +423,24 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
                 x, y, x + cell_w, y + cell_h,
                 fill=color, outline="white"
             )
+
+        # Légende des couleurs (en bas de la matrice)
+        legend_y = height - 15
+        # Légende pour les bits différents
+        self.diff_canvas.create_rectangle(10, legend_y - 8, 25, legend_y + 8,
+                                        fill="#ff6b6b", outline="white")
+        self.diff_canvas.create_text(35, legend_y, text="Différents",
+                                   anchor="w", fill=self._text_color, font=("Segoe UI", 9))
+        # Légende pour les bits 1
+        self.diff_canvas.create_rectangle(120, legend_y - 8, 135, legend_y + 8,
+                                        fill="#4CAF50", outline="white")
+        self.diff_canvas.create_text(145, legend_y, text="Bits à 1",
+                                   anchor="w", fill=self._text_color, font=("Segoe UI", 9))
+        # Légende pour les bits 0
+        self.diff_canvas.create_rectangle(220, legend_y - 8, 235, legend_y + 8,
+                                        fill="#90A4AE", outline="white")
+        self.diff_canvas.create_text(245, legend_y, text="Bits à 0",
+                                   anchor="w", fill=self._text_color, font=("Segoe UI", 9))
 
     def _update_speed(self, value):
         """Met à jour la vitesse d'animation"""
@@ -518,27 +524,73 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
             raise ValueError("Le message ne peut pas être vide")
         return input_text.strip().encode()
 
+    def _calculate_padding_info(self, message):
+        """Calcule les informations de padding sans faire le hachage complet"""
+        try:
+            # Calcul de la longueur en bits
+            data_bits = len(message) * 8
+
+            # Calcul des bits de padding
+            # On ajoute 1 bit '1', puis des zéros, puis la longueur sur 64 bits
+            # La longueur totale doit être un multiple de 512
+            total_needed = 512 * ((data_bits + 1 + 64 + 511) // 512)
+            zero_bits = total_needed - (data_bits + 1 + 64)
+
+            # Mise à jour des variables d'affichage
+            self.pad_vars['data_bits'].set(str(data_bits))
+            self.pad_vars['one_bit'].set("1")
+            self.pad_vars['zero_pad_bits'].set(str(zero_bits))
+            self.pad_vars['len_field_bits'].set("64")
+            self.pad_vars['total_bits'].set(str(total_needed))
+            self.pad_vars['blocks'].set(str(total_needed // 512))
+        except Exception as e:
+            # En cas d'erreur, on remet les valeurs par défaut
+            for key in self.pad_vars:
+                self.pad_vars[key].set("—")
+
     def do_hash(self):
-        """Calcule le hash du message avec validation"""
+        """Calcule le hash du message avec validation et met à jour le padding"""
         try:
             message = self._validate_input(self.txt.get("1.0", tk.END))
             result = sha256_trace(message)
+            self._trace = result
             self.var_hex.set(result['digest'])
+
+            # Calcul et mise à jour du padding
+            data_bits = len(message) * 8
+            total_needed = 512 * ((data_bits + 1 + 64 + 511) // 512)
+            zero_bits = total_needed - (data_bits + 1 + 64)
+
+            # Mise à jour des variables d'affichage du padding
+            self.pad_vars['data_bits'].set(str(data_bits))
+            self.pad_vars['one_bit'].set("1")
+            self.pad_vars['zero_pad_bits'].set(str(zero_bits))
+            self.pad_vars['len_field_bits'].set("64")
+            self.pad_vars['total_bits'].set(str(total_needed))
+            self.pad_vars['blocks'].set(str(total_needed // 512))
+
             self.status.set("Hash calculé avec succès")
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur lors du calcul du hash : {str(e)}")
             self.status.set("Erreur lors du calcul")
+            # En cas d'erreur, réinitialiser les champs
+            self.var_hex.set("—")
+            for key in self.pad_vars:
+                self.pad_vars[key].set("—")
 
     def do_trace(self):
-        """Trace les étapes avec validation"""
+        """Démarre le traçage et redirige vers l'onglet des rounds"""
         try:
             message = self._validate_input(self.txt.get("1.0", tk.END))
-            self._trace = sha256_trace(message)
+            result = sha256_trace(message)
+            self._trace = result
             self._current_block = 0
             self._current_round = 0
-            self.var_hex.set(self._trace['digest'])
             self.update_all_views()
-            self.status.set("Trace initialisée")
+            # Sélectionner l'onglet des rounds
+            self.nb.select(self.tab_rounds)
+            self.update()  # Forcer la mise à jour de l'interface
+            self.status.set("Traçage démarré")
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur lors du traçage : {str(e)}")
             self.status.set("Erreur lors du traçage")
@@ -555,7 +607,7 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
             self._current_round = max(0, min(self._current_round, 63))
 
             # Met à jour tous les spinbox de bloc
-            for spin in [self.spin_block, self.spin_block_s, self.spin_block_r, self.spin_block_v]:
+            for spin in [self.spin_block_s, self.spin_block_r, self.spin_block_v]:  # Suppression de self.spin_block
                 spin.config(to=max_block)
                 spin.delete(0, tk.END)
                 spin.insert(0, str(self._current_block))
@@ -567,7 +619,6 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
 
             # Met à jour les vues spécifiques
             self._update_padding_view()
-            self._update_blocks_view()
             self._update_schedule_view()
             self._update_rounds_view()
             self._update_visual_view()
@@ -577,6 +628,8 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur lors de la mise à jour des vues : {str(e)}")
             self.status.set("Erreur de mise à jour")
+
+    # Suppression de la méthode _update_blocks_view()
 
     def _update_padding_view(self):
         """Met à jour la vue de padding"""
@@ -592,22 +645,6 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
             self.pad_vars['blocks'].set(str(len(self._trace['blocks'])))
         except Exception as e:
             self.status.set("Erreur d'affichage padding")
-            raise
-
-    def _update_blocks_view(self):
-        """Met à jour la vue des blocs"""
-        try:
-            if not self._trace or not self._trace['blocks']:
-                return
-            block = self._trace['blocks'][self._current_block]
-            words = block['words']
-            # Efface la table
-            for item in self.tbl_words.get_children():
-                self.tbl_words.delete(item)
-            # Ajoute une ligne avec les mots du bloc
-            self.tbl_words.insert("", "end", values=words)
-        except Exception as e:
-            self.status.set("Erreur d'affichage blocs")
             raise
 
     def _update_schedule_view(self):
@@ -862,6 +899,7 @@ class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
             self.update_all_views()
         except (ValueError, tk.TclError):
             pass
+
 
 
 if __name__ == "__main__":
