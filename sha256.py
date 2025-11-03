@@ -74,10 +74,23 @@ def _compress(H: List[int], W: List[int], trace_rounds: List[RoundState] | None 
         a = to_uint32(T1 + T2)
         if trace_rounds is not None:
             trace_rounds.append(RoundState(i, a, b, c, d, e, f, g, h, T1, T2, K[i], W[i], ch, maj, s0, s1))
-    return [
+
+    # Calculer les valeurs finales après addition
+    final_h = [
         to_uint32(H[0] + a), to_uint32(H[1] + b), to_uint32(H[2] + c), to_uint32(H[3] + d),
         to_uint32(H[4] + e), to_uint32(H[5] + f), to_uint32(H[6] + g), to_uint32(H[7] + h),
     ]
+
+    # Ajouter un état final (round 64 virtuel) avec les valeurs après addition
+    if trace_rounds is not None:
+        trace_rounds.append(RoundState(
+            64,  # Index 64 pour le round final
+            final_h[0], final_h[1], final_h[2], final_h[3],
+            final_h[4], final_h[5], final_h[6], final_h[7],
+            0, 0, 0, 0, 0, 0, 0, 0  # T1, T2, K, W, etc. à 0 car pas de calcul
+        ))
+
+    return final_h
 
 # Public API
 def sha256(data: bytes) -> bytes:
@@ -111,12 +124,15 @@ def sha256_trace(data: bytes) -> Dict:
         W = _schedule(block_bytes)
 
         block_rounds = []
+        H_before = H.copy()  # Sauvegarder H avant la compression
         H = _compress(H, W, block_rounds)
 
         trace_blocks.append({
             "words": [f"0x{int.from_bytes(block_bytes[j:j+4], 'big'):08x}" for j in range(0, 64, 4)],
             "schedule": W,
-            "rounds": [r.__dict__ for r in block_rounds]
+            "rounds": [r.__dict__ for r in block_rounds],
+            "H_initial": H_before,  # H avant ce bloc
+            "H_final": H  # H après ce bloc (avec addition)
         })
 
     digest = "".join(f"{x:08x}" for x in H)

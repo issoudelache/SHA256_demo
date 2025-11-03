@@ -1,963 +1,459 @@
-# UI moderne (ttkbootstrap si disponible, sinon ttk standard)
-import tkinter as tk
-from tkinter import messagebox, filedialog, ttk
-from tkinter.scrolledtext import ScrolledText
-
-# try ttkbootstrap, fallback to ttk
-try:
-    import ttkbootstrap as tb
-    from ttkbootstrap.constants import *
-    UsingBootstrap = True
-    from ttkbootstrap.constants import (
-        LEFT, RIGHT, TOP, BOTTOM, X, Y, BOTH, VERTICAL, HORIZONTAL,
-        CENTER, E, W, N, S, NW, NE, SW, SE
-    )
-except ImportError:
-    import tkinter.ttk as tb
-    from tkinter.constants import *
-    UsingBootstrap = False
-    from tkinter.constants import (
-        LEFT, RIGHT, TOP, BOTTOM, X, Y, BOTH, VERTICAL, HORIZONTAL,
-        CENTER, E, W, N, S, NW, NE, SW, SE
-    )
-
+import streamlit as st
+import pandas as pd
+import numpy as np
 from sha256 import sha256_trace
+import plotly.graph_objects as go
+from streamlit_autorefresh import st_autorefresh
 
-# Constants de l'application
-SPEED_MIN = 0.1  # Très rapide
-SPEED_MAX = 2.0  # Très lent
-SPEED_DEFAULT = 0.5
+# Configuration de la page
+st.set_page_config(
+    page_title="SHA-256 — Démo pas-à-pas",
+    page_icon="🔐",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Initialisation des variables de session
+if 'trace' not in st.session_state:
+    st.session_state.trace = None
+if 'current_block' not in st.session_state:
+    st.session_state.current_block = 0
+if 'current_round' not in st.session_state:
+    st.session_state.current_round = 0
+if 'hash1' not in st.session_state:
+    st.session_state.hash1 = None
+if 'hash2' not in st.session_state:
+    st.session_state.hash2 = None
+if 'auto_play' not in st.session_state:
+    st.session_state.auto_play = False
+if 'play_speed' not in st.session_state:
+    st.session_state.play_speed = 0.5  # Vitesse en secondes entre chaque round
+if 'refresh_count' not in st.session_state:
+    st.session_state.refresh_count = 0
+
+# Titre principal
+st.title("🔐 SHA-256 — Démo pas-à-pas")
+
+# Sidebar pour les contrôles
+with st.sidebar:
+    st.header("⚙️ Contrôles")
+
+    # Upload de fichier
+    uploaded_file = st.file_uploader("Ouvrir un fichier", type=None)
+    if uploaded_file is not None:
+        content = uploaded_file.read()
+        st.session_state.uploaded_content = content.decode('utf-8', errors='replace')
+
+    st.markdown("---")
+
+    # Explications
+    with st.expander("📖 Explications", expanded=False):
+        st.markdown("""
+        **Padding** : Le padding ajoute des bits pour atteindre une taille multiple de 512 bits
+        
+        **Schedule** : Création du schedule W[0..63] avec expansion des mots
+        
+        **Rounds** : 64 rounds de compression avec mise à jour des registres a..h
+        
+        **Comparaison** : Visualisation bit à bit des différences entre deux hash
+        """)
 
 
-class ModernApp(tb.Window if UsingBootstrap else tk.Tk):
-    def __init__(self):
-        # Initialisation des variables d'état AVANT tout appel de méthode ou création de widget
-        self._trace = None
-        self._trace2 = None  # Pour la comparaison
-        self._current_block = 0
-        self._current_round = 0
-        self._auto = False
-        self._speed = SPEED_DEFAULT
-        self._speed_range = (SPEED_MIN, SPEED_MAX)
-        self._step_explanations = {
-            "padding": "Le padding ajoute des bits pour atteindre une taille multiple de 512 bits:\n- Ajout d'un bit '1'\n- Ajout de zéros\n- Ajout de la longueur du message sur 64 bits",
-            "blocks": "Le message est découpé en blocs de 512 bits,\nchaque bloc est traité en séquence",
-            "schedule": "Création du schedule W[0..63]:\n- W[0..15] = mots du bloc\n- W[16..63] = expansion avec mélange des mots précédents",
-            "rounds": "64 rounds de compression:\n- Mise à jour des registres a..h\n- Utilisation de fonctions non-linéaires\n- Addition modulo 2^32\n- Rotation et décalage de bits",
-            "comparison": "Comparaison de deux hash :\n- Visualisation bit à bit des différences\n- Calcul du pourcentage de différence\n- Impact des changements sur le résultat final"
-        }
-        self._hash1 = None
-        self._hash2 = None
-        self._comparison_result = None
+# Onglets principaux
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Message", "📊 Padding", "📋 Schedule", "🔄 Rounds", "🔍 Comparaison"])
 
-        if UsingBootstrap:
-            super().__init__(themename="darkly")
+# ===== ONGLET 1: MESSAGE ET HASH =====
+with tab1:
+    st.header("Message à hacher")
+
+    # Zone de texte pour le message
+    if 'uploaded_content' in st.session_state:
+        message_input = st.text_area("Entrez votre message:", value=st.session_state.uploaded_content, height=150, key="msg_input")
+    else:
+        message_input = st.text_area("Entrez votre message:", height=150, key="msg_input")
+
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        if st.button("🔐 Hacher", type="primary"):
+            if message_input.strip():
+                try:
+                    result = sha256_trace(message_input.encode())
+                    st.session_state.trace = result
+                    st.session_state.current_block = 0
+                    st.session_state.current_round = 0
+                    st.success("Hash calculé avec succès!")
+                except Exception as e:
+                    st.error(f"Erreur lors du calcul: {str(e)}")
+            else:
+                st.warning("Le message ne peut pas être vide")
+
+    # Affichage du digest
+    if st.session_state.trace:
+        st.markdown("### Digest (hex)")
+        st.code(st.session_state.trace['digest'], language=None)
+
+# ===== ONGLET 2: PADDING =====
+with tab2:
+    st.header("Informations de Padding")
+
+    if st.session_state.trace:
+        # Affichage du digest
+        st.markdown("### Digest (hex)")
+        st.code(st.session_state.trace['digest'], language=None)
+        st.markdown("---")
+        padding_info = st.session_state.trace['padding']
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Bits de données", padding_info['data_bits'])
+            st.metric("Bit '1'", "1")
+            st.metric("Zéros de bourrage", padding_info['zero_bits'])
+        with col2:
+            st.metric("Champ longueur (64 bits)", padding_info['len_bits'])
+            st.metric("Total après padding (bits)", padding_info['total_bits'])
+            st.metric("Nombre de blocs (512b)", len(st.session_state.trace['blocks']))
+    else:
+        st.info("Hachez d'abord un message pour voir les informations de padding")
+
+# ===== ONGLET 3: SCHEDULE =====
+with tab3:
+    st.header("Schedule W[0..63]")
+
+    if st.session_state.trace and st.session_state.trace['blocks']:
+        # Affichage du digest
+        st.markdown("### Digest (hex)")
+        st.code(st.session_state.trace['digest'], language=None)
+        st.markdown("---")
+        # Contrôles de navigation
+        col1, col2, col3 = st.columns([2, 2, 6])
+        with col1:
+            max_block = len(st.session_state.trace['blocks']) - 1
+            # Ne pas écraser current_block si en mode Play
+            if not st.session_state.auto_play:
+                new_block = st.number_input(
+                    "Bloc:",
+                    min_value=0,
+                    max_value=max_block,
+                    value=st.session_state.current_block,
+                    key="schedule_block"
+                )
+                if new_block != st.session_state.current_block:
+                    st.session_state.current_block = new_block
+            else:
+                st.number_input(
+                    "Bloc:",
+                    min_value=0,
+                    max_value=max_block,
+                    value=st.session_state.current_block,
+                    key="schedule_block_display",
+                    disabled=True
+                )
+        with col2:
+            # Ne pas écraser current_round si en mode Play
+            if not st.session_state.auto_play:
+                new_round = st.number_input(
+                    "Round:",
+                    min_value=0,
+                    max_value=64,
+                    value=st.session_state.current_round,
+                    key="schedule_round"
+                )
+                if new_round != st.session_state.current_round:
+                    st.session_state.current_round = new_round
+            else:
+                st.number_input(
+                    "Round:",
+                    min_value=0,
+                    max_value=64,
+                    value=st.session_state.current_round,
+                    key="schedule_round_display",
+                    disabled=True
+                )
+
+        # Affichage du schedule
+        block = st.session_state.trace['blocks'][st.session_state.current_block]
+        schedule = block['schedule']
+
+        # Créer un DataFrame pour l'affichage
+        df_schedule = pd.DataFrame({
+            'i': range(64),
+            'W[i]': [f"0x{w:08x}" for w in schedule]
+        })
+
+        # Mettre en évidence le round actuel
+        def highlight_row(row):
+            if row.name == st.session_state.current_round:
+                return ['background-color: #4776e6; color: white'] * len(row)
+            return [''] * len(row)
+
+        styled_df = df_schedule.style.apply(highlight_row, axis=1)
+        st.dataframe(styled_df, height=600, use_container_width=True)
+    else:
+        st.info("Hachez d'abord un message pour voir le schedule")
+
+# ===== ONGLET 4: ROUNDS =====
+with tab4:
+    st.header("Rounds de compression (0..63)")
+
+    if st.session_state.trace and st.session_state.trace['blocks']:
+        # Affichage du digest final
+        st.markdown("### Hash SHA-256 final")
+        st.code(st.session_state.trace['digest'], language=None)
+
+        # Calculer et afficher le hash intermédiaire (concaténation des registres du round actuel)
+        # On doit le faire après avoir récupéré round_info, donc on le fera plus bas
+
+        st.markdown("---")
+        # Contrôles de navigation
+        col1, col2, col3, col4, col5, col6 = st.columns([1, 1.5, 1, 1, 2, 3])
+
+        with col1:
+            if st.button("◀◀", key="prev_round"):
+                st.session_state.current_round = max(0, st.session_state.current_round - 1)
+                st.rerun()
+
+        with col2:
+            # Afficher le round actuel (en lecture seule pendant le Play)
+            if st.session_state.auto_play:
+                st.number_input(
+                    "Round:",
+                    min_value=0,
+                    max_value=64,  # Permettre d'aller jusqu'à 64 (état final)
+                    value=st.session_state.current_round,
+                    key="rounds_round_display",
+                    disabled=True
+                )
+            else:
+                new_round = st.number_input(
+                    "Round:",
+                    min_value=0,
+                    max_value=64,  # Permettre d'aller jusqu'à 64 (état final)
+                    value=st.session_state.current_round,
+                    key="rounds_round_input"
+                )
+                # Mettre à jour seulement si changé manuellement
+                if new_round != st.session_state.current_round:
+                    st.session_state.current_round = new_round
+
+        with col3:
+            if st.button("▶▶", key="next_round"):
+                st.session_state.current_round = min(64, st.session_state.current_round + 1)  # Max 64
+                st.rerun()
+
+        with col4:
+            # Bouton Play/Pause
+            if st.session_state.auto_play:
+                if st.button("⏸ Pause", key="pause_btn", type="secondary"):
+                    st.session_state.auto_play = False
+                    st.session_state.refresh_count = 0
+                    st.rerun()
+            else:
+                if st.button("▶ Play", key="play_btn", type="primary"):
+                    st.session_state.auto_play = True
+                    st.session_state.refresh_count = 0  # Réinitialiser le compteur au démarrage
+                    st.rerun()
+
+        with col5:
+            # Slider de vitesse
+            st.session_state.play_speed = st.slider(
+                "Vitesse (sec)",
+                min_value=0.1,
+                max_value=2.0,
+                value=st.session_state.play_speed,
+                step=0.1,
+                key="speed_slider",
+                help="Temps en secondes entre chaque round"
+            )
+
+        # Logique de lecture automatique
+        if st.session_state.auto_play:
+            # Convertir la vitesse en millisecondes
+            refresh_ms = int(st.session_state.play_speed * 1000)
+
+            # Auto-refresh avec le délai spécifié - retourne le nombre de refreshes
+            count = st_autorefresh(interval=refresh_ms, limit=10000, key="auto_refresh")
+
+            # Incrémenter à chaque refresh (count augmente à chaque fois)
+            if count > st.session_state.refresh_count:
+                st.session_state.refresh_count = count
+
+                # Avancer au round suivant
+                if st.session_state.current_round < 64:  # Aller jusqu'à 64 maintenant
+                    st.session_state.current_round += 1
+                else:
+                    # Passer au bloc suivant si disponible
+                    if st.session_state.current_block < len(st.session_state.trace['blocks']) - 1:
+                        st.session_state.current_block += 1
+                        st.session_state.current_round = 0
+                    else:
+                        # Fin de la lecture
+                        st.session_state.auto_play = False
+                        st.session_state.refresh_count = 0
+
+
+        # Récupérer les informations du round
+        block = st.session_state.trace['blocks'][st.session_state.current_block]
+        round_info = block['rounds'][st.session_state.current_round]
+
+        # Afficher le hash intermédiaire (concaténation des registres a..h)
+        intermediate_hash = ''.join(f"{round_info[reg]:08x}" for reg in "abcdefgh")
+
+        # Affichage différent selon le round
+        if st.session_state.current_round == 64:
+            st.markdown("### ✅ Hash final du bloc (après addition avec H)")
+            st.code(intermediate_hash, language=None)
+            st.caption("✅ Round 64 : Valeurs finales après addition des registres du round 63 avec H initial (mod 2³²)")
+            st.success("🎉 Le hash affiché ci-dessus est le résultat final du bloc !")
         else:
-            super().__init__()
-        # Couleur de texte pour les zones explicatives et les canvases (adaptée au thème)
-        if UsingBootstrap:
-            self._text_color = "#334"  # thème sombre → texte clair
+            st.markdown("### État intermédiaire du round actuel")
+            st.code(intermediate_hash, language=None)
+            if st.session_state.current_round == 63:
+                st.caption("⚠️ Round 63 : Dernière itération. Passez au round 64 pour voir le hash final après addition avec H.")
+            else:
+                st.caption(f"⚠️ Round {st.session_state.current_round} : Concaténation brute des registres a..h (avant addition finale avec H)")
+
+        st.markdown("---")
+
+        # Afficher la progression
+        if st.session_state.auto_play:
+            st.info(f"▶ Lecture en cours... Bloc {st.session_state.current_block + 1}/{len(st.session_state.trace['blocks'])} - Round {st.session_state.current_round + 1}/64")
+            progress = (st.session_state.current_round + 1) / 64
+            st.progress(progress)
+
+        # Affichage des registres
+        st.markdown("### Registres a..h")
+        cols = st.columns(8)
+        for i, reg in enumerate("abcdefgh"):
+            with cols[i]:
+                st.metric(reg.upper(), f"0x{round_info[reg]:08x}")
+
+        st.markdown("---")
+
+        # Affichage des variables T1, T2, K, W (seulement pour les rounds 0-63)
+        if st.session_state.current_round < 64:
+            st.markdown("### Variables de round")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("T1", f"0x{round_info['T1']:08x}")
+            with col2:
+                st.metric("T2", f"0x{round_info['T2']:08x}")
+            with col3:
+                st.metric("K", f"0x{round_info['K']:08x}")
+            with col4:
+                st.metric("W", f"0x{round_info['W']:08x}")
+
+            st.markdown("---")
+
+            # Affichage des opérations
+            st.markdown("### Opérations du round")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.markdown("**Ch(e,f,g)**")
+                st.code(f"0x{round_info['Ch']:08x}")
+            with col2:
+                st.markdown("**Σ1(e)**")
+                st.code(f"0x{round_info['Sigma1']:08x}")
+            with col3:
+                st.markdown("**Maj(a,b,c)**")
+                st.code(f"0x{round_info['Maj']:08x}")
         else:
-            self._text_color = "#334"     # thème clair → texte sombre
-
-        self.title("SHA-256 — Démo pas-à-pas (UI moderne)")
-        self.geometry("1200x920")
-        self.minsize(1024, 700)
-
-        # Menu
-        menubar = tk.Menu(self)
-        self.config(menu=menubar)
-        m_app = tk.Menu(menubar, tearoff=False)
-        m_view = tk.Menu(menubar, tearoff=False)
-        m_help = tk.Menu(menubar, tearoff=False)
-        menubar.add_cascade(label="Application", menu=m_app)
-        menubar.add_cascade(label="Affichage", menu=m_view)
-        menubar.add_cascade(label="Aide", menu=m_help)
-        m_app.add_command(label="Ouvrir…", command=self.open_file, accelerator="Ctrl+O")
-        m_app.add_separator()
-        m_app.add_command(label="Quitter", command=self.quit, accelerator="Ctrl+Q")
-        if UsingBootstrap:
-            m_view.add_command(label="Thème clair", command=lambda: self._switch_theme("flatly"))
-            m_view.add_command(label="Thème sombre", command=lambda: self._switch_theme("darkly"))
-        m_help.add_command(label="À propos", command=self._about)
-
-        # Shortcuts
-        self.bind_all("<Control-o>", lambda e: self.open_file())
-        self.bind_all("<Control-q>", lambda e: self.quit())
-
-        # Toolbar
-        toolbar = tb.Frame(self)
-        toolbar.pack(side=TOP, fill=X, padx=10, pady=8)  # Corrected types
-        btn_open = tb.Button(toolbar, text="Ouvrir…", command=self.open_file, width=12)
-        btn_hash = tb.Button(toolbar, text="Hacher", command=self.do_hash, width=12)
-        btn_trace = tb.Button(toolbar, text="Tracer étapes", command=self.do_trace, width=16)
-        for w in (btn_open, btn_hash, btn_trace):
-            w.pack(side=LEFT, padx=5)  # Corrected types
-
-        # Message input + digest
-        top_frame = tb.Labelframe(self, text="Message")
-        top_frame.pack(side=TOP, fill=BOTH, expand=True, padx=12, pady=(0, 10))
-        self.txt = ScrolledText(top_frame, height=6, wrap=tk.WORD)
-        self.txt.pack(side=TOP, fill=BOTH, expand=True, padx=10, pady=10)
-        # Suppression du binding pour le padding
-        digest_row = tb.Frame(top_frame)
-        digest_row.pack(side=TOP, fill=X, padx=10, pady=(0, 10))  # Corrected types
-        tb.Label(digest_row, text="Digest (hex)").pack(side=LEFT)  # Corrected types
-        self.var_hex = tk.StringVar(value="—")
-        self.entry_hex = tb.Entry(digest_row, textvariable=self.var_hex, state="readonly")
-        self.entry_hex.pack(side=LEFT, fill=X, expand=True, padx=10)  # Corrected types
-
-        # Notebook
-        nb = tb.Notebook(self)
-        nb.pack(side=TOP, fill=BOTH, expand=True, padx=12, pady=0)  # Corrected types
-        self.nb = nb
-        self.tab_padding = self._build_tab_padding()
-        self.tab_schedule = self._build_tab_schedule()
-        self.tab_rounds = self._build_tab_rounds()
-        self.tab_visual = self._build_tab_visual()
-        self.tab_matrix = self._build_tab_matrix()   # <-- NOUVEL ONGLET
-
-        # status
-        self.status = tk.StringVar(value="Prêt")
-        statusbar = tb.Frame(self)
-        statusbar.pack(side=BOTTOM, fill=X)
-        self.status_label = tb.Label(statusbar, textvariable=self.status, anchor="w")
-        self.status_label.pack(side=LEFT, padx=10, pady=6)
+            st.info("Round 64 : État final après addition. Aucune opération n'est effectuée à cette étape.")
 
 
-    # --- Event Handlers ---
-    def on_block_changed(self):
-        """Gestionnaire de changement de bloc"""
-        try:
-            block = int(self.spin_block.get())
-            self._current_block = block
-            self.update_all_views()
-        except (ValueError, tk.TclError):
-            pass
+# ===== ONGLET 5: COMPARAISON =====
+with tab5:
+    st.header("Comparaison de deux hash")
 
-    def on_round_changed(self):
-        """Gestionnaire de changement de round"""
-        try:
-            round_val = int(self.spin_round.get())
-            self._current_round = round_val
-            self.update_all_views()
-        except (ValueError, tk.TclError):
-            pass
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Message 1**")
+        msg1 = st.text_area("Entrez le premier message:", height=100, key="cmp_msg1")
+    with col2:
+        st.markdown("**Message 2**")
+        msg2 = st.text_area("Entrez le deuxième message:", height=100, key="cmp_msg2")
 
-    def on_speed_changed(self, value):
-        """Gestionnaire de changement de vitesse"""
-        try:
-            self._speed = float(value)
-            if self._auto:
-                self.auto_stop()
-                self.auto_play()
-        except (ValueError, tk.TclError):
-            pass
+    if st.button("🔍 Comparer", type="primary"):
+        if msg1.strip() and msg2.strip():
+            try:
+                hash1_result = sha256_trace(msg1.encode())
+                hash2_result = sha256_trace(msg2.encode())
 
-    def on_block_round_changed(self):
-        """Gestionnaire de changement de bloc dans la vue rounds"""
-        try:
-            block = int(self.spin_block_r.get())
-            self._current_block = block
-            self.update_all_views()
-        except (ValueError, tk.TclError):
-            pass
+                st.session_state.hash1 = hash1_result['digest']
+                st.session_state.hash2 = hash2_result['digest']
 
-    # --- Tabs builders ---
-    def _build_tab_padding(self):
-        f = tb.Frame(self.nb); self.nb.add(f, text="Padding")
-        grid = tb.Frame(f); grid.pack(side=TOP, anchor="nw", padx=16, pady=16)
-        self.pad_vars = {k: tk.StringVar(value="—") for k in
-                         ['data_bits', 'one_bit', 'zero_pad_bits', 'len_field_bits', 'total_bits', 'blocks']}
-        labels = [
-            ("Bits de données", 'data_bits'),
-            ("Bit '1'", 'one_bit'),
-            ("Zéros de bourrage", 'zero_pad_bits'),
-            ("Champ longueur (64 bits)", 'len_field_bits'),
-            ("Total après padding (bits)", 'total_bits'),
-            ("Nombre de blocs (512b)", 'blocks'),
-        ]
-        for i, (lab, key) in enumerate(labels):
-            tb.Label(grid, text=lab).grid(row=i, column=0, sticky="w", pady=4, padx=(0, 12))
-            tb.Label(grid, textvariable=self.pad_vars[key]).grid(row=i, column=1, sticky="w")
-        return f
+                st.success("Comparaison effectuée!")
+            except Exception as e:
+                st.error(f"Erreur lors de la comparaison: {str(e)}")
+        else:
+            st.warning("Les deux messages doivent être renseignés")
 
-    def _build_tab_schedule(self):
-        f = tb.Frame(self.nb); self.nb.add(f, text="Schedule (W[0..63])")
+    # Affichage de la comparaison
+    if st.session_state.hash1 and st.session_state.hash2:
+        st.markdown("### Résultats")
 
-        # Ajout des contrôles de lecture
-        ctrl, block_spin, round_spin = self._build_playback_controls(f)
-        ctrl.pack(side=TOP, fill=X, padx=12, pady=(12, 6))
-        self.spin_block_s = block_spin
-        self.spin_round_s = round_spin
-        self.spin_block_s.config(command=self._on_schedule_block_change)
-        self.spin_round_s.config(command=self._on_schedule_round_change)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Hash 1**")
+            st.code(st.session_state.hash1)
+        with col2:
+            st.markdown("**Hash 2**")
+            st.code(st.session_state.hash2)
 
-        # Reste du code existant
-        header = tb.Frame(f)
-        header.pack(side=TOP, fill=X, padx=12, pady=(12, 0))
-        self.lbl_sched_block = tb.Label(header, text="Bloc 0"); self.lbl_sched_block.pack(side=LEFT)
-        self.tbl_sched = tb.Treeview(f, columns=("i", "W"), show="headings", height=18)
-        self.tbl_sched.heading("i", text="i"); self.tbl_sched.column("i", width=70, anchor="center")
-        self.tbl_sched.heading("W", text="W[i]"); self.tbl_sched.column("W", width=260, anchor="w")
-        self.tbl_sched.pack(side=TOP, fill=BOTH, expand=True, padx=12, pady=12)
-        return f
-
-    def _build_tab_rounds(self):
-        f = tb.Frame(self.nb); self.nb.add(f, text="Rounds (0..63)")
-
-        # Panneau d'explications à droite
-        explanation = tb.Labelframe(f, text="Explications")
-        explanation.pack(side=RIGHT, fill=Y, padx=(0, 12), pady=12)
-
-        # Zone de texte pour les explications (texte coloré selon le thème)
-        self.explain_text = ScrolledText(explanation, width=40, height=15, wrap=tk.WORD, fg=self._text_color)
-        self.explain_text.pack(padx=8, pady=8)
-        self.explain_text.insert("1.0", "SHA-256 Explications:\n\n")
-        for title, text in self._step_explanations.items():
-            self.explain_text.insert(tk.END, f"• {title.title()}\n{text}\n\n")
-        self.explain_text.configure(state="disabled")
-
-        main_frame = tb.Frame(f)
-        main_frame.pack(side=LEFT, fill=BOTH, expand=True, padx=12, pady=12)
-
-        ctrl = tb.Frame(main_frame)
-        ctrl.pack(side=TOP, fill=X)
-
-        # Contrôles de bloc et round (comme avant)
-        tb.Label(ctrl, text="Bloc:").pack(side=LEFT)
-        self.spin_block_r = tk.Spinbox(ctrl, from_=0, to=0, width=6, command=self.on_block_round_changed)
-        self.spin_block_r.pack(side=LEFT, padx=(6, 12))
-        tb.Button(ctrl, text="◀", width=3, command=lambda: self._jump_block(-1, rounds=True)).pack(side=LEFT)
-        tb.Button(ctrl, text="▶", width=3, command=lambda: self._jump_block(+1, rounds=True)).pack(side=LEFT)
-        tb.Separator(ctrl, orient=tk.VERTICAL).pack(side=LEFT, fill=Y, padx=12)
-        tb.Label(ctrl, text="Round:").pack(side=LEFT)
-        self.spin_round = tk.Spinbox(ctrl, from_=0, to=63, width=6, command=self.on_round_changed)
-        self.spin_round.pack(side=LEFT, padx=6)
-        tb.Button(ctrl, text="◀", width=3, command=lambda: self._jump_round(-1)).pack(side=LEFT)
-        tb.Button(ctrl, text="▶", width=3, command=lambda: self._jump_round(+1)).pack(side=LEFT, padx=(4, 8))
-        tb.Button(ctrl, text="▶▶ Play", command=self.auto_play).pack(side=LEFT)
-        tb.Button(ctrl, text="⏸ Pause", command=self.auto_stop).pack(side=LEFT, padx=(6, 12))
-
-        # Contrôle de vitesse modifié
-        speed_frame = tb.Labelframe(ctrl, text="Vitesse")
-        speed_frame.pack(side=LEFT, padx=(6, 0), fill=Y)
-        self.speed_scale = tb.Scale(speed_frame, from_=SPEED_MAX, to=SPEED_MIN,  # Inversé : plus haut = plus lent
-                                  value=self._speed, orient="vertical", length=60,
-                                  command=self.on_speed_changed)
-        self.speed_scale.pack(padx=8, pady=4)
-
-        # Zone principale pour les registres et valeurs
-        body = tb.Frame(main_frame)
-        body.pack(side=TOP, fill=BOTH, expand=True, pady=6)
-
-        # Ajouter une visualisation des opérations
-        ops_frame = tb.Labelframe(body, text="Opérations du round")
-        ops_frame.pack(side=TOP, fill=X, pady=(0, 8))
-        self.ops_canvas = tk.Canvas(ops_frame, height=120, background="#F2FAFF")
-        self.ops_canvas.pack(fill=X, padx=8, pady=8)
-
-        # Registres et variables (comme avant)
-        regs_frame = tb.Frame(body)
-        regs_frame.pack(side=TOP, fill=BOTH, expand=True)
-        left = tb.Labelframe(regs_frame, text="Registres a..h")
-        left.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 8))
-        right = tb.Labelframe(regs_frame, text="T1 / T2 / K / W")
-        right.pack(side=LEFT, fill=BOTH, expand=True, padx=(8, 0))
-        self.round_vars = {k: tk.StringVar(value="—") for k in list("abcdefgh") + ["T1", "T2", "K", "W"]}
-        for i, reg in enumerate("abcdefgh"):
-            row = tb.Frame(left); row.pack(side=TOP, anchor="w", pady=4, padx=10)
-            tb.Label(row, text=f"{reg}").pack(side=LEFT, padx=(0, 10))
-            tb.Label(row, textvariable=self.round_vars[reg], font=("Consolas", 11)).pack(side=LEFT)
-        for lab in ["T1", "T2", "K", "W"]:
-            row = tb.Frame(right); row.pack(side=TOP, anchor="w", pady=4, padx=10)
-            tb.Label(row, text=lab).pack(side=LEFT, padx=(0, 10))
-            tb.Label(row, textvariable=self.round_vars[lab], font=("Consolas", 11)).pack(side=LEFT)
-        return f
-
-    def _build_tab_visual(self):
-        f = tb.Frame(self.nb); self.nb.add(f, text="Vue graphique")
-        top = tb.Frame(f); top.pack(fill=X, padx=8, pady=6)
-        tb.Label(top, text="Bloc:").pack(side=LEFT)
-        self.spin_block_v = tk.Spinbox(top, from_=0, to=0, width=6, command=lambda: self._on_visual_block_change())
-        self.spin_block_v.pack(side=LEFT, padx=(4, 12))
-        tb.Label(top, text="Round:").pack(side=LEFT)
-        self.spin_round_v = tk.Spinbox(top, from_=0, to=63, width=6, command=lambda: self._on_visual_round_change())
-        self.spin_round_v.pack(side=LEFT, padx=6)
-        tb.Button(top, text="◀", width=3, command=lambda: self._jump_round_visual(-1)).pack(side=LEFT)
-        tb.Button(top, text="▶", width=3, command=lambda: self._jump_round_visual(+1)).pack(side=LEFT)
-        self.canvas = tk.Canvas(f, height=360, background="#F2FAFF")
-        self.canvas.pack(fill=BOTH, expand=True, padx=8, pady=8)
-        # draw registers a..h
-        self.vis_regs = {}
-        x0, y0, w, h, gap = 40, 80, 110, 48, 18
-        for i, reg in enumerate("abcdefgh"):
-            x = x0 + i*(w+gap)
-            rect = self.canvas.create_rectangle(x, y0, x+w, y0+h, fill="#e8eefc", outline="#4776e6", width=2)
-            self.canvas.create_text(x+w/2, y0-16, text=reg, font=("Segoe UI", 11, "bold"), fill=self._text_color)
-            txt = self.canvas.create_text(x+w/2, y0+h/2, text="—", font=("Consolas", 11), fill=self._text_color)
-            self.vis_regs[reg] = (rect, txt)
-            if i > 0:
-                self.canvas.create_line(x-gap, y0+h/2, x-6, y0+h/2, arrow=tk.LAST, width=2, fill="#888")
-        # T1,T2,K,W
-        self.vis_misc = {}
-        mx0, my0 = 40, 220
-        labels = ["T1", "T2", "K", "W"]
-        for j, lab in enumerate(labels):
-            xx = mx0 + j*(w+gap)
-            rect = self.canvas.create_rectangle(xx, my0, xx+w, my0+h,
-                                                fill="#eaf7ea" if lab in ("T1", "T2") else "#fff7e6",
-                                                outline="#34a853" if lab in ("T1", "T2") else "#f6a400", width=2)
-            self.canvas.create_text(xx+w/2, my0-16, text=lab, font=("Segoe UI", 11, "bold"), fill=self._text_color)
-            txt = self.canvas.create_text(xx+w/2, my0+h/2, text="—", font=("Consolas", 11), fill=self._text_color)
-            self.vis_misc[lab] = (rect, txt)
-        self.vis_round_label = self.canvas.create_text(980, 24, text="Round: –", font=("Segoe UI", 12, "bold"), fill=self._text_color)
-        return f
-
-    # ---------- NOUVEL ONGLET : Matrices de bits ----------
-    def _build_tab_matrix(self):
-        f = tb.Frame(self.nb)
-        self.nb.add(f, text="Comparaison")
-
-        # Entrées pour les deux hash
-        input_frame = tb.Labelframe(f, text="Entrées à comparer")
-        input_frame.pack(side=TOP, fill=X, padx=12, pady=(12, 6))
-
-        # Messages côte à côte pour gagner de l'espace vertical
-        msg_frame = tb.Frame(input_frame)
-        msg_frame.pack(side=TOP, fill=X, padx=8, pady=4)
-
-        # Premier message (à gauche)
-        msg1_frame = tb.Frame(msg_frame)
-        msg1_frame.pack(side=LEFT, fill=X, expand=True, padx=(0, 4))
-        tb.Label(msg1_frame, text="Message 1:").pack(side=TOP, anchor="w")
-        self.txt_msg1 = ScrolledText(msg1_frame, height=2, width=40)
-        self.txt_msg1.pack(side=TOP, fill=X, expand=True)
-
-        # Deuxième message (à droite)
-        msg2_frame = tb.Frame(msg_frame)
-        msg2_frame.pack(side=LEFT, fill=X, expand=True, padx=(4, 0))
-        tb.Label(msg2_frame, text="Message 2:").pack(side=TOP, anchor="w")
-        self.txt_msg2 = ScrolledText(msg2_frame, height=2, width=40)
-        self.txt_msg2.pack(side=TOP, fill=X, expand=True)
-
-        # Bouton de comparaison
-        btn_frame = tb.Frame(input_frame)
-        btn_frame.pack(side=TOP, fill=X, padx=8, pady=(0, 4))
-        tb.Button(btn_frame, text="Comparer", command=self.compare_hashes).pack(side=RIGHT)
-
-        # Zone de résultats
-        results_frame = tb.Labelframe(f, text="Résultats de la comparaison")
-        results_frame.pack(side=TOP, fill=BOTH, expand=True, padx=12, pady=(0, 12))
-
-        # Affichage des différences
-        self.diff_canvas = tk.Canvas(results_frame, background='white')
-        self.diff_canvas.pack(side=TOP, fill=BOTH, expand=True, padx=8, pady=8)
-
-        return f
-
-    def compare_hashes(self):
-        """Compare deux messages et affiche leurs différences"""
-        try:
-            msg1 = self.txt_msg1.get("1.0", tk.END).strip().encode()
-            msg2 = self.txt_msg2.get("1.0", tk.END).strip().encode()
-
-            self._hash1 = sha256_trace(msg1)
-            self._hash2 = sha256_trace(msg2)
-
-
-            # Mise à jour du canvas
-            self.draw_hash_comparison(self._hash1['digest'], self._hash2['digest'])
-
-        except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur lors de la comparaison: {str(e)}")
-
-    def draw_hash_comparison(self, hash1, hash2):
-        """Dessine la visualisation des différences entre les deux hash"""
-        self.diff_canvas.delete("all")
-        width = self.diff_canvas.winfo_width()
-        height = self.diff_canvas.winfo_height()
-
-        # Calcul des dimensions et positions
-        margin_top = 50  # Espace pour le texte en haut
-        margin_bottom = 30  # Espace minimal en bas
-        matrix_height = height - margin_top - margin_bottom
-
-        # Conversion en binaire
-        bin1 = bin(int(hash1, 16))[2:].zfill(256)
-        bin2 = bin(int(hash2, 16))[2:].zfill(256)
-
-        # Calcul du pourcentage de différence
+        # Conversion en binaire et calcul des différences
+        bin1 = bin(int(st.session_state.hash1, 16))[2:].zfill(256)
+        bin2 = bin(int(st.session_state.hash2, 16))[2:].zfill(256)
         diff_bits = sum(1 for a, b in zip(bin1, bin2) if a != b)
         diff_percent = (diff_bits / 256) * 100
 
-        # Afficher les statistiques en haut
-        stats_text = f"Différences : {diff_bits} bits sur 256 ({diff_percent:.2f}%)"
-        self.diff_canvas.create_text(
-            width / 2, 20,
-            text=stats_text,
-            font=("Segoe UI", 12, "bold"),
-            fill=self._text_color
-        )
+        st.metric("Différences", f"{diff_bits} bits sur 256 ({diff_percent:.2f}%)")
 
-        # Dimensions de la matrice
-        cols = 32
-        rows = 8
-        cell_w = width / cols
-        cell_h = matrix_height / rows
+        # Visualisation matricielle des différences
+        st.markdown("### Visualisation des différences (matrice 8x32)")
 
-        # Dessiner les cellules de la matrice
+        # Créer une matrice 8x32
+        matrix = np.zeros((8, 32))
+
         for i in range(256):
-            row = i // cols
-            col = i % cols
-            x = col * cell_w
-            y = row * cell_h + margin_top
-
-            # Couleurs basées sur les différences
+            row = i // 32
+            col = i % 32
             if bin1[i] != bin2[i]:
-                color = "#ff6b6b"  # Rouge pour les différences
+                matrix[row][col] = 2  # Rouge pour les différences
+            elif bin1[i] == "1":
+                matrix[row][col] = 1  # Vert pour les bits à 1 identiques
             else:
-                color = "#4CAF50" if bin1[i] == "1" else "#90A4AE"
+                matrix[row][col] = 0  # Gris pour les bits à 0 identiques
 
-            self.diff_canvas.create_rectangle(
-                x, y, x + cell_w, y + cell_h,
-                fill=color, outline="white"
-            )
+        # Créer la heatmap avec 3 couleurs
+        # Valeurs: 0 = gris, 1 = vert, 2 = rouge
+        fig = go.Figure(data=go.Heatmap(
+            z=matrix,
+            colorscale=[
+                [0.0, '#90A4AE'],  # 0 -> gris
+                [0.5, '#4CAF50'],  # 1 -> vert
+                [1.0, '#ff6b6b']   # 2 -> rouge
+            ],
+            zmin=0,
+            zmax=2,
+            showscale=False,
+            hovertemplate='Bit %{x},%{y}<extra></extra>'
+        ))
 
-        # Légende des couleurs (en bas de la matrice)
-        legend_y = height - 15
-        # Légende pour les bits différents
-        self.diff_canvas.create_rectangle(10, legend_y - 8, 25, legend_y + 8,
-                                        fill="#ff6b6b", outline="white")
-        self.diff_canvas.create_text(35, legend_y, text="Différents",
-                                   anchor="w", fill=self._text_color, font=("Segoe UI", 9))
-        # Légende pour les bits 1
-        self.diff_canvas.create_rectangle(120, legend_y - 8, 135, legend_y + 8,
-                                        fill="#4CAF50", outline="white")
-        self.diff_canvas.create_text(145, legend_y, text="Bits à 1",
-                                   anchor="w", fill=self._text_color, font=("Segoe UI", 9))
-        # Légende pour les bits 0
-        self.diff_canvas.create_rectangle(220, legend_y - 8, 235, legend_y + 8,
-                                        fill="#90A4AE", outline="white")
-        self.diff_canvas.create_text(245, legend_y, text="Bits à 0",
-                                   anchor="w", fill=self._text_color, font=("Segoe UI", 9))
-
-    def _update_speed(self, value):
-        """Met à jour la vitesse d'animation"""
-        try:
-            self._speed = float(value)
-            if self._auto:
-                self.auto_stop()
-                self.auto_play()
-        except ValueError:
-            pass
-
-    def _build_playback_controls(self, parent):
-        """Construit les contrôles de lecture standardisés"""
-        ctrl = tb.Frame(parent)
-
-        # Contrôles de bloc
-        tb.Label(ctrl, text="Bloc:").pack(side=LEFT)
-        block_spin = tk.Spinbox(ctrl, from_=0, to=0, width=6)
-        block_spin.pack(side=LEFT, padx=(6, 12))
-
-        # Contrôles de round
-        tb.Label(ctrl, text="Round:").pack(side=LEFT)
-        round_spin = tk.Spinbox(ctrl, from_=0, to=63, width=6)
-        round_spin.pack(side=LEFT, padx=6)
-
-        # Boutons de navigation
-        nav_frame = tb.Frame(ctrl)
-        nav_frame.pack(side=LEFT, padx=12)
-        tb.Button(nav_frame, text="◀", width=3, command=lambda: self._jump_round(-1)).pack(side=LEFT)
-        tb.Button(nav_frame, text="▶", width=3, command=lambda: self._jump_round(+1)).pack(side=LEFT, padx=(4, 0))
-
-        # Boutons lecture/pause
-        play_frame = tb.Frame(ctrl)
-        play_frame.pack(side=LEFT, padx=12)
-        tb.Button(play_frame, text="▶▶ Play", command=self.auto_play).pack(side=LEFT)
-        tb.Button(play_frame, text="⏸ Pause", command=self.auto_stop).pack(side=LEFT, padx=(6, 0))
-
-        # Contrôle de vitesse
-        speed_frame = self._build_speed_control(parent)
-        speed_frame.pack(side=LEFT, padx=12, fill=Y)
-
-        return ctrl, block_spin, round_spin
-
-    def _advance_animation(self):
-        """Fait avancer l'animation d'un pas"""
-        if not self._auto:
-            return
-
-        # Avance au round suivant
-        if self._current_round < 63:
-            self._current_round += 1
-        else:
-            if self._current_block < len(self._trace['blocks']) - 1:
-                self._current_block += 1
-                self._current_round = 0
-            else:
-                self.auto_stop()
-                return
-
-        self.update_all_views()
-
-        # Programme le prochain pas
-        if self._auto:
-            self.after(int(self._speed * 1000), self._advance_animation)
-
-    def auto_play(self):
-        """Démarre la lecture automatique"""
-        if not self._auto:
-            self._auto = True
-            self._advance_animation()
-            self.status.set("Lecture automatique...")
-
-    def auto_stop(self):
-        """Arrête la lecture automatique"""
-        self._auto = False
-        self.status.set("Pause")
-
-    def _validate_input(self, input_text):
-        """Valide l'entrée utilisateur"""
-        if not input_text.strip():
-            raise ValueError("Le message ne peut pas être vide")
-        return input_text.strip().encode()
-
-    def _calculate_padding_info(self, message):
-        """Calcule les informations de padding sans faire le hachage complet"""
-        try:
-            # Calcul de la longueur en bits
-            data_bits = len(message) * 8
-
-            # Calcul des bits de padding
-            # On ajoute 1 bit '1', puis des zéros, puis la longueur sur 64 bits
-            # La longueur totale doit être un multiple de 512
-            total_needed = 512 * ((data_bits + 1 + 64 + 511) // 512)
-            zero_bits = total_needed - (data_bits + 1 + 64)
-
-            # Mise à jour des variables d'affichage
-            self.pad_vars['data_bits'].set(str(data_bits))
-            self.pad_vars['one_bit'].set("1")
-            self.pad_vars['zero_pad_bits'].set(str(zero_bits))
-            self.pad_vars['len_field_bits'].set("64")
-            self.pad_vars['total_bits'].set(str(total_needed))
-            self.pad_vars['blocks'].set(str(total_needed // 512))
-        except Exception as e:
-            # En cas d'erreur, on remet les valeurs par défaut
-            for key in self.pad_vars:
-                self.pad_vars[key].set("—")
-
-    def do_hash(self):
-        """Calcule le hash du message avec validation et met à jour le padding"""
-        try:
-            message = self._validate_input(self.txt.get("1.0", tk.END))
-            result = sha256_trace(message)
-            self._trace = result
-            self.var_hex.set(result['digest'])
-
-            # Calcul et mise à jour du padding
-            data_bits = len(message) * 8
-            total_needed = 512 * ((data_bits + 1 + 64 + 511) // 512)
-            zero_bits = total_needed - (data_bits + 1 + 64)
-
-            # Mise à jour des variables d'affichage du padding
-            self.pad_vars['data_bits'].set(str(data_bits))
-            self.pad_vars['one_bit'].set("1")
-            self.pad_vars['zero_pad_bits'].set(str(zero_bits))
-            self.pad_vars['len_field_bits'].set("64")
-            self.pad_vars['total_bits'].set(str(total_needed))
-            self.pad_vars['blocks'].set(str(total_needed // 512))
-
-            self.status.set("Hash calculé avec succès")
-        except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur lors du calcul du hash : {str(e)}")
-            self.status.set("Erreur lors du calcul")
-            # En cas d'erreur, réinitialiser les champs
-            self.var_hex.set("—")
-            for key in self.pad_vars:
-                self.pad_vars[key].set("—")
-
-    def do_trace(self):
-        """Démarre le traçage et redirige vers l'onglet des rounds"""
-        try:
-            message = self._validate_input(self.txt.get("1.0", tk.END))
-            result = sha256_trace(message)
-            self._trace = result
-            self._current_block = 0
-            self._current_round = 0
-            self.update_all_views()
-            # Sélectionner l'onglet des rounds
-            self.nb.select(self.tab_rounds)
-            self.update()  # Forcer la mise à jour de l'interface
-            self.status.set("Traçage démarré")
-        except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur lors du traçage : {str(e)}")
-            self.status.set("Erreur lors du traçage")
-
-    def update_all_views(self):
-        """Met à jour toutes les vues avec gestion des erreurs"""
-        try:
-            if not self._trace:
-                return
-
-            # Mise à jour des contrôles de bloc
-            max_block = len(self._trace['blocks']) - 1
-            self._current_block = max(0, min(self._current_block, max_block))
-            self._current_round = max(0, min(self._current_round, 63))
-
-            # Met à jour tous les spinbox de bloc
-            for spin in [self.spin_block_s, self.spin_block_r, self.spin_block_v]:  # Suppression de self.spin_block
-                spin.config(to=max_block)
-                spin.delete(0, tk.END)
-                spin.insert(0, str(self._current_block))
-
-            # Met à jour tous les spinbox de round
-            for spin in [self.spin_round, self.spin_round_s, self.spin_round_v]:
-                spin.delete(0, tk.END)
-                spin.insert(0, str(self._current_round))
-
-            # Met à jour les vues spécifiques
-            self._update_padding_view()
-            self._update_schedule_view()
-            self._update_rounds_view()
-            self._update_visual_view()
-
-            self.status.set(f"Bloc {self._current_block}, Round {self._current_round}")
-
-        except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur lors de la mise à jour des vues : {str(e)}")
-            self.status.set("Erreur de mise à jour")
-
-    # Suppression de la méthode _update_blocks_view()
-
-    def _update_padding_view(self):
-        """Met à jour la vue de padding"""
-        try:
-            if not self._trace:
-                return
-            padding_info = self._trace['padding']
-            self.pad_vars['data_bits'].set(str(padding_info['data_bits']))
-            self.pad_vars['one_bit'].set("1")
-            self.pad_vars['zero_pad_bits'].set(str(padding_info['zero_bits']))
-            self.pad_vars['len_field_bits'].set(str(padding_info['len_bits']))
-            self.pad_vars['total_bits'].set(str(padding_info['total_bits']))
-            self.pad_vars['blocks'].set(str(len(self._trace['blocks'])))
-        except Exception as e:
-            self.status.set("Erreur d'affichage padding")
-            raise
-
-    def _update_schedule_view(self):
-        """Met à jour la vue du schedule"""
-        try:
-            if not self._trace or not self._trace['blocks']:
-                return
-            block = self._trace['blocks'][self._current_block]
-            schedule = block['schedule']
-            # Efface la table
-            for item in self.tbl_sched.get_children():
-                self.tbl_sched.delete(item)
-            # Ajoute les lignes pour chaque mot du schedule
-            for i, w in enumerate(schedule):
-                self.tbl_sched.insert("", "end", values=(i, f"0x{w:08x}"))
-            # Met en évidence le round actuel si dans les limites
-            if 0 <= self._current_round < len(schedule):
-                self.highlight_schedule_row(self._current_round)
-        except Exception as e:
-            self.status.set("Erreur d'affichage schedule")
-            raise
-
-    def _concat_registers_digest(self, round_info) -> str:
-        """Concatène les registres a..h (32 bits chacun) en une chaîne hex de 64 caractères."""
-        try:
-            return ''.join(f"{round_info[reg]:08x}" for reg in "abcdefgh")
-        except Exception:
-            return "—"
-
-    def _update_rounds_view(self):
-        """Met à jour la vue des rounds"""
-        try:
-            if not self._trace or not self._trace['blocks']:
-                return
-            block = self._trace['blocks'][self._current_block]
-            round_info = block['rounds'][self._current_round]
-
-            # Mise à jour des registres
-            for reg in "abcdefgh":
-                self.round_vars[reg].set(f"0x{round_info[reg]:08x}")
-
-            # Mise à jour des variables T1, T2, K, W
-            self.round_vars["T1"].set(f"0x{round_info['T1']:08x}")
-            self.round_vars["T2"].set(f"0x{round_info['T2']:08x}")
-            self.round_vars["K"].set(f"0x{round_info['K']:08x}")
-            self.round_vars["W"].set(f"0x{round_info['W']:08x}")
-
-            # Mettre à jour l'affichage du digest en concaténant a..h
-            digest_from_regs = self._concat_registers_digest(round_info)
-            self.var_hex.set(digest_from_regs)
-
-            # Mise à jour du canvas d'opérations
-            self._draw_round_operations(round_info)
-        except Exception as e:
-            self.status.set("Erreur d'affichage rounds")
-            raise
-
-    def _update_visual_view(self):
-        """Met à jour la vue graphique"""
-        try:
-            if not self._trace or not self._trace['blocks']:
-                return
-            block = self._trace['blocks'][self._current_block]
-            round_info = block['rounds'][self._current_round]
-
-            # Mise à jour des registres
-            for reg, (rect, txt) in self.vis_regs.items():
-                value = f"0x{round_info[reg]:08x}"
-                self.canvas.itemconfig(txt, text=value)
-
-            # Mise à jour des variables
-            for var in ["T1", "T2", "K", "W"]:
-                rect, txt = self.vis_misc[var]
-                value = f"0x{round_info[var]:08x}"
-                self.canvas.itemconfig(txt, text=value)
-
-            # Mise à jour du label de round
-            self.canvas.itemconfig(
-                self.vis_round_label,
-                text=f"Round {self._current_round}: 0x{round_info['h']:08x}"
-            )
-        except Exception as e:
-            self.status.set("Erreur d'affichage graphique")
-            raise
-
-    def _draw_round_operations(self, round_info):
-        """Dessine les opérations du round actuel"""
-        try:
-            self.ops_canvas.delete("all")
-            # Configuration du dessin
-            width = self.ops_canvas.winfo_width()
-            height = self.ops_canvas.winfo_height()
-
-            # Dessine les opérations principales
-            x1, y1 = 20, 20
-            self.ops_canvas.create_text(x1, y1, text="Ch(e,f,g)", anchor="w", fill=self._text_color)
-            self.ops_canvas.create_text(x1, y1+20, text=f"0x{round_info['Ch']:08x}", anchor="w", fill=self._text_color)
-
-            x2 = width // 3
-            self.ops_canvas.create_text(x2, y1, text="Σ1(e)", anchor="w", fill=self._text_color)
-            self.ops_canvas.create_text(x2, y1+20, text=f"0x{round_info['Sigma1']:08x}", anchor="w", fill=self._text_color)
-
-            x3 = 2 * width // 3
-            self.ops_canvas.create_text(x3, y1, text="Maj(a,b,c)", anchor="w", fill=self._text_color)
-            self.ops_canvas.create_text(x3, y1+20, text=f"0x{round_info['Maj']:08x}", anchor="w", fill=self._text_color)
-
-            # Dessine les flèches d'opération
-            y2 = height - 30
-            self.ops_canvas.create_line(x1+60, y1+30, x1+60, y2, arrow="last")
-            self.ops_canvas.create_line(x2+60, y1+30, x2+60, y2, arrow="last")
-            self.ops_canvas.create_line(x3+60, y1+30, x3+60, y2, arrow="last")
-
-        except Exception as e:
-            self.status.set("Erreur d'affichage opérations")
-            raise
-
-    def highlight_schedule_row(self, row_index):
-        """Met en évidence une ligne dans le tableau du schedule"""
-        try:
-            for item in self.tbl_sched.get_children():
-                tags = ()
-                if self.tbl_sched.index(item) == row_index:
-                    tags = ("highlight",)
-                self.tbl_sched.item(item, tags=tags)
-        except Exception as e:
-            self.status.set("Erreur de surbrillance")
-            raise
-
-    def _tweak_style(self):
-        """Ajuste le style de l'interface"""
-        if UsingBootstrap:
-            style = self.style
-        else:
-            style = tb.Style()
-
-        # Configure les styles des tableaux
-        style.configure("Treeview", rowheight=25)
-        style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
-
-        # Style pour les lignes surlignées
-        style.map("Treeview",
-            foreground=[("selected", "#ffffff")],
-            background=[("selected", "#4776e6")])
-
-        # Configure le tag de surbrillance
-        self.tbl_sched.tag_configure("highlight", background="#e8eefc")
-
-    def _switch_theme(self, theme):
-        """Change le thème de l'application"""
-        if UsingBootstrap:
-            self.style.theme_use(theme)
-
-    def _about(self):
-        """Affiche la boîte de dialogue À propos"""
-        messagebox.showinfo(
-            "À propos",
-            "SHA-256 — Démo pas-à-pas\n\n"
-            "Une application pédagogique pour comprendre\n"
-            "le fonctionnement de l'algorithme SHA-256"
+        fig.update_layout(
+            title="Matrice des bits (256 bits en grille 8×32)",
+            xaxis_title="Colonne",
+            yaxis_title="Ligne",
+            height=400
         )
 
-    def open_file(self):
-        """Ouvre un fichier et charge son contenu"""
-        try:
-            filename = filedialog.askopenfilename(
-                title="Ouvrir un fichier",
-                filetypes=[("Tous les fichiers", "*.*")]
-            )
-            if filename:
-                with open(filename, 'rb') as f:
-                    data = f.read()
-                self.txt.delete("1.0", tk.END)
-                self.txt.insert("1.0", data.decode('utf-8', errors='replace'))
-                self.status.set(f"Fichier chargé : {filename}")
-        except Exception as e:
-            messagebox.showerror("Erreur", f"Impossible d'ouvrir le fichier : {str(e)}")
+        st.plotly_chart(fig, use_container_width=True)
 
-    def _build_speed_control(self, parent):
-        """Construit le contrôle de vitesse"""
-        frame = tb.Labelframe(parent, text="Vitesse")
-        scale = tb.Scale(
-            frame,
-            from_=SPEED_MAX,
-            to=SPEED_MIN,
-            value=self._speed,
-            orient="vertical",
-            length=60,
-            command=self._update_speed
-        )
-        scale.pack(padx=8, pady=4)
-        return frame
+        # Légende minimaliste et jolie
+        st.markdown("#### Légende")
+        legend_cols = st.columns(3)
+        with legend_cols[0]:
+            st.markdown("🟩 **Bits à 1** (identiques)")
+        with legend_cols[1]:
+            st.markdown("⬜ **Bits à 0** (identiques)")
+        with legend_cols[2]:
+            st.markdown("🟥 **Bits différents**")
 
-    def _jump_block(self, delta, rounds=False):
-        """Saute au bloc suivant/précédent"""
-        try:
-            if not self._trace:
-                return
-            new_block = self._current_block + delta
-            if 0 <= new_block < len(self._trace['blocks']):
-                self._current_block = new_block
-                self.update_all_views()
-        except Exception as e:
-            self.status.set(f"Erreur de navigation : {str(e)}")
-
-    def _jump_round(self, delta):
-        """Saute au round suivant/précédent"""
-        try:
-            if not self._trace:
-                return
-            new_round = self._current_round + delta
-            if 0 <= new_round < 64:
-                self._current_round = new_round
-                self.update_all_views()
-        except Exception as e:
-            self.status.set(f"Erreur de navigation : {str(e)}")
-
-    def _jump_round_visual(self, delta):
-        """Saute au round suivant/précédent dans la vue graphique"""
-        try:
-            if not self._trace:
-                return
-            new_round = int(self.spin_round_v.get()) + delta
-            if 0 <= new_round < 64:
-                self.spin_round_v.delete(0, tk.END)
-                self.spin_round_v.insert(0, str(new_round))
-                self._current_round = new_round
-                self.update_all_views()
-        except Exception as e:
-            self.status.set(f"Erreur de navigation : {str(e)}")
-
-    def _on_schedule_block_change(self):
-        """Gestionnaire de changement de bloc dans la vue schedule"""
-        try:
-            block = int(self.spin_block_s.get())
-            self._current_block = block
-            self.update_all_views()
-        except (ValueError, tk.TclError):
-            pass
-
-    def _on_schedule_round_change(self):
-        """Gestionnaire de changement de round dans la vue schedule"""
-        try:
-            round_val = int(self.spin_round_s.get())
-            self._current_round = round_val
-            self.update_all_views()
-        except (ValueError, tk.TclError):
-            pass
-
-    def _on_visual_block_change(self):
-        """Gestionnaire de changement de bloc dans la vue graphique"""
-        try:
-            block = int(self.spin_block_v.get())
-            self._current_block = block
-            self.update_all_views()
-        except (ValueError, tk.TclError):
-            pass
-
-    def _on_visual_round_change(self):
-        """Gestionnaire de changement de round dans la vue graphique"""
-        try:
-            round_val = int(self.spin_round_v.get())
-            self._current_round = round_val
-            self.update_all_views()
-        except (ValueError, tk.TclError):
-            pass
-
-    # Dans la méthode _build_vis_registers
-    def _build_vis_registers(self, parent):
-        frame = ttk.Frame(parent)
-
-        # Création d'un style personnalisé pour les registres
-        style = ttk.Style()
-        style.configure('Register.TLabel',
-                       background='white',
-                       foreground='black',
-                       font=('Courier', 14),
-                       relief='solid',
-                       padding=5)
-
-        for i, reg in enumerate(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']):
-            header = ttk.Label(frame, text=reg.upper(), font=('Courier', 12))
-            header.grid(row=0, column=i)
-
-            # Utilisation d'un Label ttk avec notre style personnalisé
-            value = ttk.Label(frame,
-                             text='00000000',
-                             style='Register.TLabel',
-                             width=10)
-            value.grid(row=1, column=i, padx=2, pady=2)
-            self.vis_regs[reg] = value
-
-        return frame
-
-    def update_registers(self, state=None):
-        if not state:
-            return
-        values = {
-            'a': state.a, 'b': state.b, 'c': state.c, 'd': state.d,
-            'e': state.e, 'f': state.f, 'g': state.g, 'h': state.h
-        }
-        for reg, value in values.items():
-            self.vis_regs[reg].configure(text=f"{value:08x}")
-
-
-if __name__ == "__main__":
-    app = None
-    try:
-        app = ModernApp()
-        app.mainloop()
-    except Exception as e:
-        if app and hasattr(app, 'status'):
-            app.status.set(f"Erreur : {str(e)}")
-            messagebox.showerror("Erreur", f"Une erreur fatale est survenue : {str(e)}")
-        else:
-            print(f"Erreur de démarrage : {str(e)}")
-            messagebox.showerror("Erreur de démarrage", f"Impossible de lancer l'application : {str(e)}")
