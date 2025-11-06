@@ -124,6 +124,25 @@ with tab3:
         st.markdown("### Digest (hex)")
         st.code(st.session_state.trace['digest'], language=None)
         st.markdown("---")
+
+        # Encadré d'explication
+        st.info("**Récurrence du message schedule**")
+
+        # Formule principale
+        st.latex(r"W[i] = \sigma_1(W[i-2]) + W[i-7] + \sigma_0(W[i-15]) + W[i-16] \pmod{2^{32}}")
+
+        # Définitions de σ0 et σ1 en deux colonnes
+        col_sigma0, col_sigma1 = st.columns(2)
+
+        with col_sigma0:
+            st.latex(r"\sigma_0(x) = \text{ROTR}^7(x) \oplus \text{ROTR}^{18}(x) \oplus \text{SHR}^3(x)")
+
+        with col_sigma1:
+            st.latex(r"\sigma_1(x) = \text{ROTR}^{17}(x) \oplus \text{ROTR}^{19}(x) \oplus \text{SHR}^{10}(x)")
+
+        # Espace avant le contenu
+        st.markdown("---")
+
         # Contrôles de navigation
         col1, col2, col3 = st.columns([2, 2, 6])
         with col1:
@@ -208,7 +227,9 @@ with tab4:
         col1, col2, col3, col4, col5, col6 = st.columns([1, 1.5, 1, 1, 2, 3])
 
         with col1:
-            if st.button("◀◀", key="prev_round"):
+            # Désactiver le bouton Précédent si on est au round 0
+            prev_disabled = st.session_state.current_round <= 0
+            if st.button("◀◀", key="prev_round", disabled=prev_disabled):
                 st.session_state.current_round = max(0, st.session_state.current_round - 1)
                 st.rerun()
 
@@ -236,8 +257,11 @@ with tab4:
                     st.session_state.current_round = new_round
 
         with col3:
-            if st.button("▶▶", key="next_round"):
-                st.session_state.current_round = min(64, st.session_state.current_round + 1)  # Max 64
+            # Désactiver le bouton Suivant si on est au round 64 (état final)
+            total_rounds = 64
+            next_disabled = st.session_state.current_round >= total_rounds
+            if st.button("▶▶", key="next_round", disabled=next_disabled):
+                st.session_state.current_round = min(total_rounds, st.session_state.current_round + 1)
                 st.rerun()
 
         with col4:
@@ -316,8 +340,23 @@ with tab4:
 
         # Afficher la progression
         if st.session_state.auto_play:
-            st.info(f"▶ Lecture en cours... Bloc {st.session_state.current_block + 1}/{len(st.session_state.trace['blocks'])} - Round {st.session_state.current_round + 1}/64")
-            progress = (st.session_state.current_round + 1) / 64
+            total_rounds = 64
+            # Afficher le round actuel (0-based, donc on affiche +1 pour l'utilisateur)
+            # Mais on ne dépasse jamais total_rounds dans l'affichage
+            display_round = min(st.session_state.current_round + 1, total_rounds)
+            st.info(f"▶ Lecture en cours... Bloc {st.session_state.current_block + 1}/{len(st.session_state.trace['blocks'])} - Round {display_round}/{total_rounds}")
+
+            # Calcul de la progression avec protection contre les dépassements
+            # round_idx est 0-based (0 à 63 pour les rounds normaux, 64 pour l'état final)
+            if total_rounds <= 1:
+                # Cas dégénéré
+                progress = 1.0
+            else:
+                # round_idx / (total_rounds - 1) pour que round 63 donne 1.0
+                progress = st.session_state.current_round / (total_rounds - 1)
+
+            # Clamp la valeur entre 0.0 et 1.0
+            progress = min(max(progress, 0.0), 1.0)
             st.progress(progress)
 
         # Affichage des registres
