@@ -66,6 +66,26 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Message", "📊 Padding", "📋 Sc
 with tab1:
     st.header("Message à hacher")
 
+    # Encadré récapitulatif pour l'oral
+    with st.expander("📌 Points clés ", expanded=False):
+        st.markdown("""
+        **Objectif** : comprendre comment SHA-256 fabrique une empreinte à partir d'un message.
+        
+        **Définition** : un hachage = empreinte de taille fixe ; SHA-256 → 256 bits (64 hex).
+        
+        **Propriétés clés** : déterministe, unidirectionnel (on ne remonte pas au message), résistant aux collisions, effet avalanche (~50 % des bits changent si on modifie 1 caractère).
+        
+        **Ce n'est pas du chiffrement** : pas de clé, pas de "déchiffrement".
+        
+        **Usages** : intégrité des fichiers, signatures/blocks (dans d'autres constructions), mots de passe mais via des fonctions lentes et salées (bcrypt/Argon2), pas SHA-256 seul.
+        
+        **Plan de la démo** : 5 onglets → Message (entrée + digest), Padding (formatage sur 512 bits), Schedule (W[0..63]), Rounds (64 tours de compression), Comparaison (avalanche).
+        
+        **Ce qu'on va observer** : bits, rotations, XOR, additions mod 2³² ; et une sortie qui semble aléatoire.
+        
+        **Message final** : même si l'empreinte est publique, retrouver le message est infaisable.
+        """)
+
     # Zone de texte pour le message
     if 'uploaded_content' in st.session_state:
         message_input = st.text_area("Entrez votre message:", value=st.session_state.uploaded_content, height=150, key="msg_input")
