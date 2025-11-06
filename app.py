@@ -361,6 +361,19 @@ with tab4:
 
         # Affichage des registres
         st.markdown("### Registres a..h")
+
+        # Afficher les formules pour a et e (seulement pour les rounds 0-63)
+        if st.session_state.current_round < 64:
+            cols_formula = st.columns(8)
+            formulas = ["= (T1+T2) mod 2³²", "", "", "", "= (d+T1) mod 2³²", "", "", ""]
+            for i, formula in enumerate(formulas):
+                with cols_formula[i]:
+                    if formula:
+                        st.markdown(f"<div style='text-align: center; font-size: 0.8em; color: #666; margin-bottom: 0.5em;'>{formula}</div>", unsafe_allow_html=True)
+                    else:
+                        st.markdown("<div style='height: 1.8em;'></div>", unsafe_allow_html=True)
+
+        # Afficher les registres
         cols = st.columns(8)
         for i, reg in enumerate("abcdefgh"):
             with cols[i]:
