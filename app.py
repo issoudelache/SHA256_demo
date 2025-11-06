@@ -394,6 +394,14 @@ with tab4:
             with col4:
                 st.metric("W", f"0x{round_info['W']:08x}")
 
+            # Formules LaTeX pour T1 et T2
+            st.markdown("")
+            col_t1, col_t2 = st.columns(2)
+            with col_t1:
+                st.latex(r"T_1 = h + \Sigma_1(e) + \text{Ch}(e,f,g) + K_i + W_i \pmod{2^{32}}")
+            with col_t2:
+                st.latex(r"T_2 = \Sigma_0(a) + \text{Maj}(a,b,c) \pmod{2^{32}}")
+
             st.markdown("---")
 
             # Affichage des opérations
